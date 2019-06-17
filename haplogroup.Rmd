@@ -3,7 +3,10 @@ title: Effects of mitochondrial haplogroups and variants on anthracycline associ
   cardiomyopathy
 author: "Jeremy Leipzig & Marijana Vukovic"
 date: "3/7/2017"
+always_allow_html: yes
 output:
+  pdf_document:
+    toc: yes
   html_document:
     fig_caption: yes
     toc: yes
@@ -89,17 +92,21 @@ rCRS is a [somewhat arbitrary reference](http://www.nature.com/jhg/journal/v59/n
 
 ### Variants by genbank frequency
 Mitomaster computes frequency of each variant in its corpus of 30,589 GenBank sequences. 
+
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 allmms %>% mutate(allele=paste(tnt,tpos,qnt,sep="")) %>% group_by(tpos,allele,calc_locus,gb_perc) %>% summarize(cnt=n()) %>% ungroup() %>% arrange(tpos) %>% select(calc_locus,allele,cnt,gb_perc)  -> variantsbypos
 variantsbypos %>% filter(gb_perc>50) -> macroity
 variantsbypos %>% filter(gb_perc<1) -> rare
 ggplot(variantsbypos,aes(gb_perc))+geom_histogram(binwidth=1)
+ggsave("variantsbypos.pdf")
 ```
 
 ### Variants by haplogroup frequency
 Mitomaster also computes frequency within minor haplogroups. Frequencies near 100% are likely haplogroup-defining variants
+
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(allmms,aes(hap_perc))+geom_histogram(binwidth=1)+scale_x_continuous(breaks=seq(0,100,by=10))
+ggsave("variantsbyhapfreq.pdf")
 ```
 
 `r nrow(rare)` of the variants are very rare (<1%) could be Mitochip artefacts, especially if they appear in more than one subject. Others are more common than not, and reflect the oddity of rCRS as a reference.
@@ -109,6 +116,7 @@ The breakdown of macro haplogroups
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(df,aes(macrohaplogroup))+geom_bar(aes(fill=superpop))
+ggsave("macrohaplogroups.pdf")
 ```
  
 Why are there so many Asians when that is not a self-reporting group? Here is the breakdown of Asian haplogroups:
@@ -134,6 +142,7 @@ pheno$outcome<-factor(pheno$outcome)
 merge(df,pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(HAPPOP = as.factor(ifelse(eur==1,"European",ifelse(mex==1,"Mexican",ifelse(afr==1,"African","Other"))))) -> cpdf
 
 ggplot(cpdf,aes(macrohaplogroup))+geom_bar(aes(fill=HAPPOP))
+ggsave("amerindians.pdf")
 ```
 
 The prevalance of A haplogroups associated with Amerindian populations in Mexico is historically consistent. See http://www.ncbi.nlm.nih.gov/pmc/articles/PMC3051415/
@@ -143,8 +152,10 @@ The prevalance of A haplogroups associated with Amerindian populations in Mexico
 Three principal components from population-defining SNPs were provided as courtesy by [CAG](https://caglab.org).
 
 The first two PCs against self reported ethnicity:
+
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(cpdf,aes(pca1,pca2))+geom_point(aes(color=HAPPOP))
+ggsave("selfreported.pdf")
 ```
 
 # Left ventricular systolic dysfunction
@@ -154,11 +165,13 @@ Cannot justify using parametric tests.
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(cpdf,aes(lvsd))+geom_histogram(bins=10)
+ggsave("distribution.pdf")
 ```
 
 ## Macrohaplogroup analysis
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(cpdf,aes(macrohaplogroup,lvsd))+geom_boxplot()
+ggsave("Macrohaplogroup.pdf")
 ```
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
@@ -189,6 +202,7 @@ Due to high variance, no macro haplogroup is significantly different
 ## Haplogroup (letter-number-letter) analysis
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(cpdf,aes(haplogroup,lvsd))+geom_violin()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggsave("letternumberletter.pdf")
 ```
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
@@ -217,7 +231,9 @@ ggp_build <- plotly_build(p)
 ggp_build$layout$height = 1000
 ggp_build$layout$width = 1000
 
-ggp_build
+#ggp_build
+p
+ggsave("lvsdsuperpopauto.pdf")
 ```
 
 Mitochondrial superpopulation on the x-facet, LVSD on the y-facet. PCA's on the axes.
@@ -229,12 +245,15 @@ ggp_build <- plotly_build(p)
 ggp_build$layout$height = 1000
 ggp_build$layout$width = 1000
 
-ggp_build
+#ggp_build
+p
+ggsave("Mitochondrial_super_LVSD.pdf")
 ```
 
 ## Micro haplogroup
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(cpdf,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggsave("Microhaplogroup.pdf")
 ```
 
 
@@ -346,6 +365,7 @@ knitr::kable(snponly)
 ## GLMs
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ggplot(display_gwas,aes(tpos,-log(p.val)))+geom_point()+facet_grid(. ~ variable)
+ggsave("glmgwas.pdf")
 ```
 
 # Haplogroups of interest
@@ -361,6 +381,7 @@ oind <- order(as.numeric(by(haphsubset$lvsd, haphsubset$microhaplogroup, median)
 haphsubset$microhaplogroup <- factor(haphsubset$microhaplogroup, levels=levels(factor(haphsubset$microhaplogroup))[oind])
 
 ggplot(haphsubset,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggsave("h.pdf")
 ```
 
 
@@ -397,6 +418,7 @@ df %>% merge(pheno,by=c("Regno","dsource")) %>% filter(macrohaplogroup=='H') %>%
 df %>% filter(macrohaplogroup=='H') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(letternumber=factor(str_extract(haplogroup,"[A-Z][0-9]+"))) -> Hdf
 
 ggplot(Hdf %>% filter(macrohaplogroup %in% c("H")))+geom_jitter(aes(sex,lvsd,color=letternumber))
+ggsave("hsex.pdf")
 ```
 
 ## T
@@ -404,21 +426,21 @@ ggplot(Hdf %>% filter(macrohaplogroup %in% c("H")))+geom_jitter(aes(sex,lvsd,col
 haplotypeOfInterest<-'T'
 ```
 
-```{r haptd, ref.label='dosubsetdisp', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r haptd, ref.label='dosubsetdisp', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 ```
 
-```{r hapts, ref.label='dosubsetstat', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r hapts, ref.label='dosubsetstat', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 ```
 
 ### Enrichment
 Are there any differences in variants between the `r hot_samples` >=3's and the `r cold_samples` 0's?
 
 #### Enriched in high LVSD (>1fc)
-```{r hapts, ref.label='enrichHigh', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r hapts, ref.label='enrichHigh', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 ```
 
 #### Enriched in low LVSD (<-1fc)
-```{r hapts, ref.label='enrichLow', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r hapts, ref.label='enrichLow', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 ```
 
 ### T1 vs T2
@@ -432,10 +454,11 @@ T2 is defined by A11812G A14233G (C16296T)
 
 See http://www.ncbi.nlm.nih.gov/pubmed/19434233
 
-```{r t1vst2, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r t1vst2, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 df %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tdf
 
 ggplot(Tdf,aes(twoletterhaplogroup,lvsd))+geom_violin()
+ggsave("t1t2.pdf")
 
 allmms %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tmms
 Tmms %>% filter(twoletterhaplogroup=='T1') %>% group_by(tpos) %>% summarize(cnt=n()) -> T1locs
@@ -444,14 +467,14 @@ merge(T1locs,T2locs,by="tpos",all=TRUE) -> Tall
 ```
 
 T subclade summary
-```{r Tsubs, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r Tsubs, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 Tdf %>% group_by(twoletterhaplogroup) %>% summarize(cnt=n(),mean=mean(lvsd),range=paste(min(lvsd),'-',max(lvsd),sep=""),sd=sd(lvsd))->Tsummary
 knitr::kable(Tsummary)
 ```
 
 Logistic regression assuming lvsd>1 is affected
 
-```{r t1vst2logt, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r t1vst2logt, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 
 Tdf$affected <- ifelse(Tdf$lvsd>1,TRUE,FALSE)
 model <- glm(affected ~ twoletterhaplogroup,family=binomial(link='logit'),data=Tdf)
@@ -460,7 +483,7 @@ summary(model)
 
 Logistic regression by the `outcome` variable (ignoring -9's)
 
-```{r t1vst2logtnonine, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```{r t1vst2logtnonine, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 
 Tdf %>% filter(outcome %in% c('0','1')) %>% mutate(status=ifelse(outcome=='1',TRUE,FALSE)) -> Tdfo
 
