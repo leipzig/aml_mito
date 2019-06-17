@@ -1,0 +1,476 @@
+---
+title: Effects of mitochondrial haplogroups and variants on anthracycline associated
+  cardiomyopathy
+author: "Jeremy Leipzig & Marijana Vukovic"
+date: "3/7/2017"
+output:
+  html_document:
+    fig_caption: yes
+    toc: yes
+  css: test.css
+---
+```{r set-options, echo=FALSE, cache=FALSE}
+options(width=1200)
+```
+
+# MitoChip and MiSeq analysis
+97 subjects were run through the Illumina MitoChip v2. Calls were processed using [ReseqChip](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-10-440) to obtain consensus sequences. These were processed through Mitomaster to obtain variants and Haplogroup calls (via Haplogrep).
+
+96 subjects were sequenced on an Illumina MiSeq and aligned by CAG using bwa-mem to the g1k_v37 reference. Samtools/bcftools was used to create a consensus sequence for reads mapping to MT. These sequences were also processed through Mitomaster.
+
+7 subjects were run on both platforms.
+
+# Population structure
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(nlme)
+library(lme4)
+library(reshape2)
+library(caret)
+library(nnet)
+
+seqmms<-read.table("rawData/seqmms.txt",header=TRUE,sep="\t")
+seqmms$dsource<-'seq'
+
+chipmms<-read.table("rawData/chipmms.txt",header=TRUE,sep="\t")
+chipmms$dsource<-'chip'
+
+rbind(seqmms,chipmms) %>% mutate(sample = str_replace(query,'human_mtDNA_RCRS:','')) -> allmms
+
+allmms$Regno<-str_sub(allmms$query,-6)
+Asian <- c('A', 'B', 'C', 'D', 'E', 'F',       
+            'G', 'M', 'N', 'O', 'P', 'Q',       
+            'S', 'Y', 'Z')
+African <- c('L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6')
+European <- c('HV', 'H', 'I', 'J', 'K', 'R','T', 'U', 'V', 'W', 'X')
+
+isEuropean<-function(x){ifelse(str_detect(x,(paste('^',European,sep="",collapse="|"))),TRUE,FALSE)}
+isAsian<-function(x){ifelse(str_detect(x,paste('^',Asian,sep="",collapse="|")),TRUE,FALSE)}
+isAfrican<-function(x){ifelse(str_detect(x,paste('^',African,sep="",collapse="|")),TRUE,FALSE)}
+
+getsuper<-function(x){ifelse(isEuropean(x),"European",ifelse(isAsian(x),"Asian","African"))}
+macrohaplos<-paste(paste('^',Asian,sep="",collapse="|"),paste('^',African,sep="",collapse="|"),paste('^',European,sep="",collapse="|"),sep="|",collapse="")
+getmacro<-function(x){return(str_match(x,macrohaplos)[1])}
+
+allmms$macrohaplogroup<-factor(sapply(allmms$haplogroup,getmacro),levels=c(African,Asian,European))
+allmms$superpop<-factor(sapply(allmms$haplogroup,getsuper),levels=c("African","Asian","European"))
+
+# the mitomaster verbose haplogroup includes private mutations like A2+(64)+@16111, U5b1+16189+@16192
+allmms$haplogroup<-factor(str_replace(allmms$haplogroup,'\\+\\S+',''))
+allmms$microhaplogroup<-factor(str_replace(allmms$verbose_haplogroup,'\\+\\S+',''))
+
+allmms  %>% group_by(sample,Regno,dsource,haplogroup,microhaplogroup,macrohaplogroup,superpop) %>% select(sample,Regno,dsource,haplogroup,microhaplogroup,macrohaplogroup,superpop) %>% distinct() -> df
+```
+
+## Initial findings
+### Concordance of sequence and microarray data
+Sequence and microarray microhaplogroups were identical between the 7 samples run on both platforms
+
+Duplicate microarray samples were removed for the remainder for the analysis.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(df %>% group_by(Regno) %>% summarize(cnt=n(),samples=toString(sample),sources=toString(dsource),mhaps=toString(microhaplogroup)) %>% filter(cnt>1))
+
+df %>% group_by(Regno) %>% summarize(cnt=n()) %>% filter(cnt>1) %>% select(Regno) -> dupregs
+df %>% filter(dsource=='chip') %>% filter(Regno %in% dupregs$Regno) %>% ungroup() %>% select(sample)  -> dupchips
+
+df %>% filter(!(sample %in% dupchips$sample)) -> df
+allmms %>% filter(!(sample %in% dupchips$sample)) -> allmms
+```
+
+### Loci
+A total of `r length(unique(allmms$tpos))` loci witnessed variants in at least one subject.
+
+### A word of caution
+rCRS is a [somewhat arbitrary reference](http://www.nature.com/jhg/journal/v59/n2/full/jhg2013120a.html) with microhaplogroup H2a2a1. Variants from the rCRS do not imply deleteriousness, and in many cases reference alleles are risk factors for disease or other non-optimal outcomes. It is just as important to weight "protective variants" equally.
+
+### Variants by genbank frequency
+Mitomaster computes frequency of each variant in its corpus of 30,589 GenBank sequences. 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+allmms %>% mutate(allele=paste(tnt,tpos,qnt,sep="")) %>% group_by(tpos,allele,calc_locus,gb_perc) %>% summarize(cnt=n()) %>% ungroup() %>% arrange(tpos) %>% select(calc_locus,allele,cnt,gb_perc)  -> variantsbypos
+variantsbypos %>% filter(gb_perc>50) -> macroity
+variantsbypos %>% filter(gb_perc<1) -> rare
+ggplot(variantsbypos,aes(gb_perc))+geom_histogram(binwidth=1)
+```
+
+### Variants by haplogroup frequency
+Mitomaster also computes frequency within minor haplogroups. Frequencies near 100% are likely haplogroup-defining variants
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(allmms,aes(hap_perc))+geom_histogram(binwidth=1)+scale_x_continuous(breaks=seq(0,100,by=10))
+```
+
+`r nrow(rare)` of the variants are very rare (<1%) could be Mitochip artefacts, especially if they appear in more than one subject. Others are more common than not, and reflect the oddity of rCRS as a reference.
+
+
+The breakdown of macro haplogroups
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(df,aes(macrohaplogroup))+geom_bar(aes(fill=superpop))
+```
+ 
+Why are there so many Asians when that is not a self-reporting group? Here is the breakdown of Asian haplogroups:
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(df %>% filter(superpop=='Asian') %>% group_by(macrohaplogroup) %>% summarize(count=n()))
+```
+
+What is the concordance with SVM PCA-component classified by [Hapmap populations](http://www.sanger.ac.uk/resources/downloads/human/hapmap3.html)
+
+These calls were made using the SVM's trained on HapMap and the following breakdown:
+```
+EUR = CEU + TSI
+AFR = ASW + LWK + MKK + YRI
+MEX = MXL
+```
+See https://github.research.chop.edu/vujkovicm/aplenc_gwas/blob/master/R/pop_strat.R for the code.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+read.csv("rawData/COG_A1031_MitoExp_Phenotypes.csv") %>% rename(lvsd=left_ventricular_systolic_dysfunction) %>% mutate(dsource=ifelse(MitoSeq==1,"seq","chip")) -> pheno
+pheno$sex<-factor(pheno$sex)
+pheno$outcome<-factor(pheno$outcome)
+
+merge(df,pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(HAPPOP = as.factor(ifelse(eur==1,"European",ifelse(mex==1,"Mexican",ifelse(afr==1,"African","Other"))))) -> cpdf
+
+ggplot(cpdf,aes(macrohaplogroup))+geom_bar(aes(fill=HAPPOP))
+```
+
+The prevalance of A haplogroups associated with Amerindian populations in Mexico is historically consistent. See http://www.ncbi.nlm.nih.gov/pmc/articles/PMC3051415/
+
+## Autosomal population background
+### Classification
+Three principal components from population-defining SNPs were provided as courtesy by [CAG](https://caglab.org).
+
+The first two PCs against self reported ethnicity:
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cpdf,aes(pca1,pca2))+geom_point(aes(color=HAPPOP))
+```
+
+# Left ventricular systolic dysfunction
+
+## Distribution
+Cannot justify using parametric tests.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cpdf,aes(lvsd))+geom_histogram(bins=10)
+```
+
+## Macrohaplogroup analysis
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cpdf,aes(macrohaplogroup,lvsd))+geom_boxplot()
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+cpdf %>% group_by(macrohaplogroup) %>% summarize(cnt=n(),mean_lvsd=mean(lvsd)) %>% arrange(mean_lvsd) -> lvsdbymajhap
+knitr::kable(lvsdbymajhap)
+```
+
+Linear model
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary(lm(lvsd ~ macrohaplogroup,data=cpdf))
+```
+
+Do the PCA's based on the microarrays help?
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary(lm(lvsd ~ macrohaplogroup + pca1 + pca2 + pca3,data=cpdf))
+```
+
+Nope.
+
+All-by-all haplogroups kruskal-wallis
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+aov.res <- kruskal.test(lvsd ~ macrohaplogroup, data=cpdf)
+aov.res
+```
+
+Due to high variance, no macro haplogroup is significantly different
+
+## Haplogroup (letter-number-letter) analysis
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cpdf,aes(haplogroup,lvsd))+geom_violin()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+cpdf %>% group_by(haplogroup) %>% summarize(mean_lvsd=mean(lvsd)) %>% arrange(mean_lvsd) -> lvsdbyminhap
+knitr::kable(lvsdbyminhap)
+```
+
+Linear model
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary(lm(lvsd ~ haplogroup,data=cpdf))
+```
+
+All-by-all haplogroups kruskal-wallis
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+aov.res <- kruskal.test(lvsd ~ haplogroup, data=cpdf)
+aov.res
+```
+
+## LVSD vs superpopulation and autosomal population
+Autosomal background on x-facet, mitochondrial superpopulation on the y-facet. LVSD on the y-axis, SNP-chip PCA component 1 on the x-axis.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,fig.width=10, fig.height=10}
+p<-ggplot(cpdf,aes(pca1,lvsd))+geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup)))+facet_grid(superpop~HAPPOP)
+
+ggp_build <- plotly_build(p)
+ggp_build$layout$height = 1000
+ggp_build$layout$width = 1000
+
+ggp_build
+```
+
+Mitochondrial superpopulation on the x-facet, LVSD on the y-facet. PCA's on the axes.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE,fig.width=10, fig.height=10}
+p<-ggplot(cpdf %>% filter(!is.na(lvsd)),aes(pca1,pca2))+geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup)))+facet_grid(lvsd~superpop)
+
+ggp_build <- plotly_build(p)
+ggp_build$layout$height = 1000
+ggp_build$layout$width = 1000
+
+ggp_build
+```
+
+## Micro haplogroup
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(cpdf,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+# Individual variants on LVSD
+## Potentially deleterious mutations in cohort
+
+Subjects with potentially deleterious mutations with Genbank frequency <= 1% are below.
+
+```{r deleterious, echo=FALSE, message=FALSE, warning=FALSE}
+ellipses<-function(longcommas){
+  droplast<-str_replace(str_replace(longcommas,"((\\S+, ){5}).+","\\1"),", $","")
+  addellipses<-str_replace(droplast,"((\\S+(, |$)){5})","\\1...")
+  addellipses
+}
+
+merge(allmms,pheno,by=c("Regno","dsource"),all=FALSE)  %>% filter(patientphenotype != '', gb_perc<=1.00) %>% group_by(patientphenotype) %>% summarize(cnt=n(),allele=toString(unique(allele)),gb_perc=toString(unique(gb_perc)),subjects=ellipses(toString(unique(Regno))),meanlvsd=mean(lvsd)) -> deleterious
+knitr::kable(deleterious)
+```
+
+## High LVSD variants
+The following variants are found in at least 2 high (>=2.0) LVSD subjects but never in very low (<1.0) subjects
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+merge(allmms,pheno,by=c("Regno","dsource"),all=FALSE) %>% filter(!is.na(lvsd)) %>% select(Regno,tpos,tnt,qnt,gb_perc,hap_perc,calc_aachange,calc_locus,lvsd,macrohaplogroup,haplogroup) -> snpdf
+
+snpdf %>% filter(lvsd >= 2.0) %>% group_by(tpos) %>% summarize(cnt=n(),gb_avg=mean(gb_perc), allele=toString(unique(paste(tnt,tpos,qnt,sep=""))), locus=toString(unique(calc_locus)), effect=toString(unique(calc_aachange)), haps=toString(haplogroup), hap_percs=toString(hap_perc), subjects = toString(Regno)) %>% filter(cnt>=2) -> highlvsdvariants
+
+#consider ,grepl('non-syn',effect)
+# which ones are red herrings
+snpdf %>% filter(tpos %in% highlvsdvariants$tpos) %>% filter(lvsd < 1) %>% group_by(tpos) %>% summarize(cnt=n()) -> redherrings
+
+highlvsdvariants %>% filter(!(tpos %in% redherrings$tpos)) -> onlyhighlvsd
+knitr::kable(onlyhighlvsd)
+```
+
+The following variants are found in at least 2 very low (<1.0)  LVSD subjects but never in high (>=2.0) subjects
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+snpdf %>% filter(lvsd < 1) %>% group_by(tpos) %>% summarize(cnt=n(),gb_avg=mean(gb_perc), allele=toString(unique(paste(tnt,tpos,qnt,sep=""))), locus=toString(unique(calc_locus)), effect=toString(unique(calc_aachange)), haps=toString(haplogroup), hap_percs=toString(hap_perc), subjects = toString(Regno)) %>% filter(cnt>=2) -> lowlvsdvariants
+
+#consider ,grepl('non-syn',effect)
+# which ones are red herrings
+snpdf %>% filter(tpos %in% highlvsdvariants$tpos) %>% filter(lvsd >= 2.0) %>% group_by(tpos) %>% summarize(cnt=n()) -> redherrings
+
+lowlvsdvariants %>% filter(!(tpos %in% redherrings$tpos)) -> onlylowlvsd
+knitr::kable(onlylowlvsd)
+```
+
+## mtGWAS
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+allregnos<-levels(factor(snpdf$Regno))
+#prep for snp-level tests
+#for a given position return a row for every sample and whether they are variant for that position as well as pheno/haplo info
+getsnppvale<-function(pos){
+  #if you are in this table you are variant as a matter of 
+  allmms %>% filter(tpos==pos) %>% select(Regno) %>% mutate(variant=TRUE) -> variants
+  if(nrow(variants)>0){
+    referregs <- allregnos[!(allregnos %in% variants$Regno)]
+    allsubs<-variants
+    if(length(referregs)>0){
+      
+      reference<-data.frame(Regno=referregs,variant=FALSE)
+      allsubs<-rbind(allsubs,reference)
+    
+      merge(allsubs,cpdf,all=FALSE) %>% filter(!is.na(lvsd)) %>% select(Regno,pca1,pca2,pca3,variant,haplogroup,macrohaplogroup,superpop,sex,outcome,lvsd) -> snp
+      
+      #variant might be completely exclusive to some subject with NULL lvsd, need more than cardinality of 1
+      if(length(levels(factor(snp$variant)))>1){
+        #would population help?
+        
+        #not sure we want to throw in haplogroup as a factor
+        snp_hap_glm_model <- glm(lvsd ~ variant + macrohaplogroup,data=snp)
+        snp_pca_glm_model <- glm(lvsd ~ variant + pca1 + pca2 + pca3,data=snp)
+        snp_only_glm_model <- glm(lvsd ~ variant,data=snp)
+
+        snp_hap_res<-summary(snp_hap_glm_model)
+        snp_pca_res<-summary(snp_pca_glm_model)
+        snp_only_res<-summary(snp_only_glm_model)
+        return(list(snp_hap=snp_hap_res$coefficients["variantTRUE",4],snp_pca=snp_pca_res$coefficients["variantTRUE",4],snp_only=snp_only_res$coefficients["variantTRUE",4]))
+      }
+    }
+  }
+  return(list(NA_real_,NA_real_))
+}
+
+#just get the pvals and annotate later
+allmms %>% group_by(tpos) %>%  arrange(tpos) %>% select(tpos) %>% distinct() %>% mutate(hapsnp_p.val=getsnppvale(tpos)[[1]],snponly_p.val=getsnppvale(tpos)[[2]]) -> gwas
+
+melt(gwas,id.vars = c("tpos"),value.name="p.val") -> display_gwas
+```
+
+## GLM using both haplogroup and non-haplogroup defining variants
+p.value < 0.05 before correction for multiple testing
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+gwas %>% filter(hapsnp_p.val<0.05) %>% merge(allmms,by="tpos") %>% filter(hap_perc<80) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% group_by(tpos,hapsnp_p.val,tnt,qnt,calc_locus,gb_perc) %>% summarize(allele=toString(unique(paste(tnt,tpos,qnt,sep=""))), haps=toString(haplogroup), hap_percs=toString(hap_perc), subjects = toString(Regno),mean_lvsd=mean(lvsd)) -> hapsnp
+
+knitr::kable(hapsnp)
+```
+
+## GLM - non-haplogroup defining variants only
+p.value < 0.05 before correction for multiple testing
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+gwas %>% filter(snponly_p.val<0.05) %>% merge(allmms,by="tpos") %>% filter(hap_perc<80) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% group_by(tpos,snponly_p.val ,qnt,tnt,calc_locus,gb_perc) %>% summarize(allele=toString(unique(paste(tnt,tpos,qnt,sep=""))), haps=toString(haplogroup), hap_percs=toString(hap_perc), subjects = toString(Regno),mean_lvsd=mean(lvsd)) -> snponly
+
+knitr::kable(snponly)
+```
+
+## GLMs
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(display_gwas,aes(tpos,-log(p.val)))+geom_point()+facet_grid(. ~ variable)
+```
+
+# Haplogroups of interest
+## H
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplotypeOfInterest<-'H'
+```
+
+```{r dosubsetdisp, echo=FALSE, message=FALSE, warning=FALSE}
+bymedian <- with(cpdf %>% filter(macrohaplogroup==haplotypeOfInterest), reorder(microhaplogroup, lvsd, median))
+haphsubset<-cpdf %>% filter(macrohaplogroup==haplotypeOfInterest)
+oind <- order(as.numeric(by(haphsubset$lvsd, haphsubset$microhaplogroup, median)))    
+haphsubset$microhaplogroup <- factor(haphsubset$microhaplogroup, levels=levels(factor(haphsubset$microhaplogroup))[oind])
+
+ggplot(haphsubset,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r dosubsetstat, echo=FALSE, message=FALSE, warning=FALSE}
+allmms %>% filter(macrohaplogroup==haplotypeOfInterest) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% filter(lvsd>=3) %>% group_by(tpos) %>% summarize(cnt=n()) -> hot
+allmms %>% filter(macrohaplogroup==haplotypeOfInterest) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% filter(lvsd==0) %>% group_by(tpos) %>% summarize(cnt=n()) -> cold
+allmms %>% filter(macrohaplogroup==haplotypeOfInterest) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% filter(lvsd>=3) %>% summarize(samples=n_distinct(Regno)) %>% as.integer() -> hot_samples
+allmms %>% filter(macrohaplogroup==haplotypeOfInterest) %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% filter(lvsd==0) %>% summarize(samples=n_distinct(Regno)) %>% as.integer() -> cold_samples
+
+merge(hot,cold,by="tpos",all=TRUE) %>% rename(hot=cnt.x,cold=cnt.y) -> comp_lvsd
+comp_lvsd[is.na(comp_lvsd)] <- 0
+comp_lvsd %>% mutate(enrichment=log2((hot/hot_samples)/(cold/cold_samples))) %>% merge(allmms,by="tpos") %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% group_by(tpos,tnt,qnt,calc_locus,gb_perc,hot,cold,enrichment) %>% summarize(allele=toString(unique(paste(tnt,tpos,qnt,sep="")))) -> display_haphsubset
+```
+
+### Enrichment
+Are there any differences in variants between the `r hot_samples` >=3's and the `r cold_samples` 0's?
+
+#### Enriched in high LVSD (>1fc)
+```{r enrichHigh, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(display_haphsubset %>% filter(enrichment > 1))
+```
+
+#### Enriched in low LVSD (<-1fc)
+```{r enrichLow, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(display_haphsubset %>% filter(enrichment < -1))
+```
+
+#### Sex differences in H
+H has differences in the number of high LVSD subjects by gender. There is no discernable interaction with any H subclades.
+
+```{r sexdifference, echo=FALSE, message=FALSE, warning=FALSE}
+df %>% merge(pheno,by=c("Regno","dsource")) %>% filter(macrohaplogroup=='H') %>% group_by(sex,lvsd>=3) %>% summarize(cnt=n()) %>% ungroup()
+
+df %>% filter(macrohaplogroup=='H') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(letternumber=factor(str_extract(haplogroup,"[A-Z][0-9]+"))) -> Hdf
+
+ggplot(Hdf %>% filter(macrohaplogroup %in% c("H")))+geom_jitter(aes(sex,lvsd,color=letternumber))
+```
+
+## T
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+haplotypeOfInterest<-'T'
+```
+
+```{r haptd, ref.label='dosubsetdisp', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```
+
+```{r hapts, ref.label='dosubsetstat', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```
+
+### Enrichment
+Are there any differences in variants between the `r hot_samples` >=3's and the `r cold_samples` 0's?
+
+#### Enriched in high LVSD (>1fc)
+```{r hapts, ref.label='enrichHigh', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```
+
+#### Enriched in low LVSD (<-1fc)
+```{r hapts, ref.label='enrichLow', echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+```
+
+### T1 vs T2
+T1 and T2, appear to segregate strongly with regard to LVSD. 
+
+The major subclades of T are distinguished by just a few loci. 
+
+T1 is defined by C12633A A16163G T16189C
+
+T2 is defined by A11812G A14233G (C16296T) 
+
+See http://www.ncbi.nlm.nih.gov/pubmed/19434233
+
+```{r t1vst2, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+df %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tdf
+
+ggplot(Tdf,aes(twoletterhaplogroup,lvsd))+geom_violin()
+
+allmms %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tmms
+Tmms %>% filter(twoletterhaplogroup=='T1') %>% group_by(tpos) %>% summarize(cnt=n()) -> T1locs
+Tmms %>% filter(twoletterhaplogroup=='T2') %>% group_by(tpos) %>% summarize(cnt=n()) -> T2locs
+merge(T1locs,T2locs,by="tpos",all=TRUE) -> Tall
+```
+
+T subclade summary
+```{r Tsubs, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+Tdf %>% group_by(twoletterhaplogroup) %>% summarize(cnt=n(),mean=mean(lvsd),range=paste(min(lvsd),'-',max(lvsd),sep=""),sd=sd(lvsd))->Tsummary
+knitr::kable(Tsummary)
+```
+
+Logistic regression assuming lvsd>1 is affected
+
+```{r t1vst2logt, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+
+Tdf$affected <- ifelse(Tdf$lvsd>1,TRUE,FALSE)
+model <- glm(affected ~ twoletterhaplogroup,family=binomial(link='logit'),data=Tdf)
+summary(model)
+```
+
+Logistic regression by the `outcome` variable (ignoring -9's)
+
+```{r t1vst2logtnonine, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='{{SLINK}}/'}
+
+Tdf %>% filter(outcome %in% c('0','1')) %>% mutate(status=ifelse(outcome=='1',TRUE,FALSE)) -> Tdfo
+
+model <- glm(status ~ twoletterhaplogroup,family=binomial(link='logit'),data=Tdfo)
+summary(model)
+```
+
+### Next steps
+- Parsable Phylotree
+- Build mixed model, test at different levels (macro, two-letter, three-letter)
+- Look at heteroplasmies
+- Investigate burden of variants - especially in ND4 and ND6
+- Develop RF or other ML approaches for classification
