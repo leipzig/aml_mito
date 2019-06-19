@@ -34,7 +34,9 @@ library(lme4)
 library(reshape2)
 library(caret)
 library(nnet)
+library(ggthemes)
 
+source("pubtheme.R")
 seqmms<-read.table("rawData/seqmms.txt",header=TRUE,sep="\t")
 seqmms$dsource<-'seq'
 
@@ -61,7 +63,7 @@ getmacro<-function(x){return(str_match(x,macrohaplos)[1])}
 allmms$macrohaplogroup<-factor(sapply(allmms$haplogroup,getmacro),levels=c(African,Asian,European))
 allmms$superpop<-factor(sapply(allmms$haplogroup,getsuper),levels=c("African","Asian","European"))
 
-# the mitomaster verbose haplogroup includes private mutations like A2+(64)+@16111, U5b1+16189+@16192
+# the mitomaster verbose haplogroup includes private mutations like A2+(64) +@16111, U5b1+16189+@16192
 allmms$haplogroup<-factor(str_replace(allmms$haplogroup,'\\+\\S+',''))
 allmms$microhaplogroup<-factor(str_replace(allmms$verbose_haplogroup,'\\+\\S+',''))
 
@@ -97,7 +99,7 @@ Mitomaster computes frequency of each variant in its corpus of 30,589 GenBank se
 allmms %>% mutate(allele=paste(tnt,tpos,qnt,sep="")) %>% group_by(tpos,allele,calc_locus,gb_perc) %>% summarize(cnt=n()) %>% ungroup() %>% arrange(tpos) %>% select(calc_locus,allele,cnt,gb_perc)  -> variantsbypos
 variantsbypos %>% filter(gb_perc>50) -> macroity
 variantsbypos %>% filter(gb_perc<1) -> rare
-ggplot(variantsbypos,aes(gb_perc))+geom_histogram(binwidth=1)
+ggplot(variantsbypos,aes(gb_perc)) +geom_histogram(binwidth=1) + theme_economist(base_size = 15)
 ggsave("variantsbypos.pdf")
 ```
 
@@ -105,7 +107,7 @@ ggsave("variantsbypos.pdf")
 Mitomaster also computes frequency within minor haplogroups. Frequencies near 100% are likely haplogroup-defining variants
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(allmms,aes(hap_perc))+geom_histogram(binwidth=1)+scale_x_continuous(breaks=seq(0,100,by=10))
+ggplot(allmms,aes(hap_perc)) +geom_histogram(binwidth=1) +scale_x_continuous(breaks=seq(0,100,by=10)) + theme_economist(base_size = 15)
 ggsave("variantsbyhapfreq.pdf")
 ```
 
@@ -115,7 +117,7 @@ ggsave("variantsbyhapfreq.pdf")
 The breakdown of macro haplogroups
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(df,aes(macrohaplogroup))+geom_bar(aes(fill=superpop))
+ggplot(df,aes(macrohaplogroup)) +geom_bar(aes(fill=superpop)) + theme_economist(base_size = 15)
 ggsave("macrohaplogroups.pdf")
 ```
  
@@ -141,7 +143,7 @@ pheno$outcome<-factor(pheno$outcome)
 
 merge(df,pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(HAPPOP = as.factor(ifelse(eur==1,"European",ifelse(mex==1,"Mexican",ifelse(afr==1,"African","Other"))))) -> cpdf
 
-ggplot(cpdf,aes(macrohaplogroup))+geom_bar(aes(fill=HAPPOP))
+ggplot(cpdf,aes(macrohaplogroup)) +geom_bar(aes(fill=HAPPOP)) + theme_economist(base_size = 15)
 ggsave("amerindians.pdf")
 ```
 
@@ -154,7 +156,7 @@ Three principal components from population-defining SNPs were provided as courte
 The first two PCs against self reported ethnicity:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(cpdf,aes(pca1,pca2))+geom_point(aes(color=HAPPOP))
+ggplot(cpdf,aes(pca1,pca2)) +geom_point(aes(color=HAPPOP)) + theme_economist(base_size = 15)
 ggsave("selfreported.pdf")
 ```
 
@@ -164,13 +166,13 @@ ggsave("selfreported.pdf")
 Cannot justify using parametric tests.
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(cpdf,aes(lvsd))+geom_histogram(bins=10)
+ggplot(cpdf,aes(lvsd)) +geom_histogram(bins=10) + theme_economist(base_size = 15)
 ggsave("distribution.pdf")
 ```
 
 ## Macrohaplogroup analysis
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(cpdf,aes(macrohaplogroup,lvsd))+geom_boxplot()
+ggplot(cpdf,aes(macrohaplogroup,lvsd)) +geom_boxplot() + theme_economist(base_size = 15)
 ggsave("Macrohaplogroup.pdf")
 ```
 
@@ -201,7 +203,7 @@ Due to high variance, no macro haplogroup is significantly different
 
 ## Haplogroup (letter-number-letter) analysis
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(cpdf,aes(haplogroup,lvsd))+geom_violin()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplot(cpdf,aes(haplogroup,lvsd)) +geom_violin() +theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme_economist(base_size = 15)
 ggsave("letternumberletter.pdf")
 ```
 
@@ -225,7 +227,7 @@ aov.res
 Autosomal background on x-facet, mitochondrial superpopulation on the y-facet. LVSD on the y-axis, SNP-chip PCA component 1 on the x-axis.
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE,fig.width=10, fig.height=10}
-p<-ggplot(cpdf,aes(pca1,lvsd))+geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup)))+facet_grid(superpop~HAPPOP)
+p<-ggplot(cpdf,aes(pca1,lvsd)) +geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup))) +facet_grid(superpop~HAPPOP) + theme_economist(base_size = 15)
 
 ggp_build <- plotly_build(p)
 ggp_build$layout$height = 1000
@@ -239,7 +241,7 @@ ggsave("lvsdsuperpopauto.pdf")
 Mitochondrial superpopulation on the x-facet, LVSD on the y-facet. PCA's on the axes.
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE,fig.width=10, fig.height=10}
-p<-ggplot(cpdf %>% filter(!is.na(lvsd)),aes(pca1,pca2))+geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup)))+facet_grid(lvsd~superpop)
+p<-ggplot(cpdf %>% filter(!is.na(lvsd)),aes(pca1,pca2)) +geom_point(aes(color=haplogroup,text = paste("sample:", sample, "<br>bc:",Barcode, "<br>mthap:", microhaplogroup))) +facet_grid(lvsd~superpop) + theme_economist(base_size = 15)
 
 ggp_build <- plotly_build(p)
 ggp_build$layout$height = 1000
@@ -252,7 +254,7 @@ ggsave("Mitochondrial_super_LVSD.pdf")
 
 ## Micro haplogroup
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(cpdf,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplot(cpdf,aes(microhaplogroup,lvsd)) +geom_boxplot() +theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme_economist(base_size = 15)
 ggsave("Microhaplogroup.pdf")
 ```
 
@@ -364,7 +366,7 @@ knitr::kable(snponly)
 
 ## GLMs
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-ggplot(display_gwas,aes(tpos,-log(p.val)))+geom_point()+facet_grid(. ~ variable)
+ggplot(display_gwas,aes(tpos,-log(p.val))) +geom_point() +facet_grid(. ~ variable) + theme_economist(base_size = 15)
 ggsave("glmgwas.pdf")
 ```
 
@@ -380,7 +382,7 @@ haphsubset<-cpdf %>% filter(macrohaplogroup==haplotypeOfInterest)
 oind <- order(as.numeric(by(haphsubset$lvsd, haphsubset$microhaplogroup, median)))    
 haphsubset$microhaplogroup <- factor(haphsubset$microhaplogroup, levels=levels(factor(haphsubset$microhaplogroup))[oind])
 
-ggplot(haphsubset,aes(microhaplogroup,lvsd))+geom_boxplot()+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggplot(haphsubset,aes(microhaplogroup,lvsd)) +geom_boxplot() +theme(axis.text.x = element_text(angle = 90, hjust = 1)) + theme_economist(base_size = 15)
 ggsave("h.pdf")
 ```
 
@@ -417,7 +419,7 @@ df %>% merge(pheno,by=c("Regno","dsource")) %>% filter(macrohaplogroup=='H') %>%
 
 df %>% filter(macrohaplogroup=='H') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(letternumber=factor(str_extract(haplogroup,"[A-Z][0-9]+"))) -> Hdf
 
-ggplot(Hdf %>% filter(macrohaplogroup %in% c("H")))+geom_jitter(aes(sex,lvsd,color=letternumber))
+ggplot(Hdf %>% filter(macrohaplogroup %in% c("H"))) +geom_jitter(aes(sex,lvsd,color=letternumber)) + theme_economist(base_size = 15)
 ggsave("hsex.pdf")
 ```
 
@@ -457,7 +459,7 @@ See http://www.ncbi.nlm.nih.gov/pubmed/19434233
 ```{r t1vst2, echo=FALSE, message=FALSE, cache=FALSE,  fig.path='SLINK/'}
 df %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tdf
 
-ggplot(Tdf,aes(twoletterhaplogroup,lvsd))+geom_violin()
+ggplot(Tdf,aes(twoletterhaplogroup,lvsd)) +geom_violin() + theme_economist(base_size = 15)
 ggsave("t1t2.pdf")
 
 allmms %>% filter(macrohaplogroup=='T') %>% merge(pheno,by=c("Regno","dsource"),all=FALSE) %>% mutate(twoletterhaplogroup=factor(str_sub(haplogroup,1,2))) -> Tmms
